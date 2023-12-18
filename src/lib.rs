@@ -39,6 +39,10 @@
 //! # License
 //!
 //! This project is licensed under the MIT License - see the LICENSE file for details.
+//!
+//! # Acknowledgments
+//!
+//! Special thanks to [ChatGPT](https://www.openai.com/gpt), an AI language model by OpenAI, for providing invaluable assistance during the development of this project. ChatGPT helped with code suggestions, problem-solving, and provided guidance throughout the development process.
 
 use anyhow::Error;
 use std::convert::TryFrom;
