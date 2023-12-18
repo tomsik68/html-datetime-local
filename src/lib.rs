@@ -1,5 +1,5 @@
-use anyhow::{Context, Error};
-use std::convert::{TryFrom, TryInto};
+use anyhow::Error;
+use std::convert::TryFrom;
 use std::str::FromStr;
 use thiserror::Error;
 
@@ -8,8 +8,8 @@ mod tests;
 
 #[derive(Debug, PartialEq, Clone)]
 struct Datetime {
-    date: YearMonthDay,
-    time: HourMinuteSecond,
+    pub date: YearMonthDay,
+    pub time: HourMinuteSecond,
 }
 
 impl FromStr for Datetime {
@@ -18,81 +18,51 @@ impl FromStr for Datetime {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut parts = s.split('T');
 
-        let date = YearMonthDay::from_str(parts.next().ok_or(
-            DateTimeParseError::DateComponentError {
-                source: anyhow::anyhow!("The string does not contain a date component"),
-                part: "".to_string(),
-            },
-        )?)?;
-        let time = HourMinuteSecond::from_str(parts.next().ok_or(
-            DateTimeParseError::TimeComponentError {
-                source: anyhow::anyhow!("The string does not contain a time component"),
-                part: "".to_string(),
-            },
-        )?)?;
+        let date = YearMonthDay::from_str(parts.next().ok_or_else(|| DateTimeParseError {
+            component: Component::Date,
+            found: "".to_string(),
+            kind: DateTimeParseErrorKind::ValueMissing,
+        })?)?;
+
+        let time = HourMinuteSecond::from_str(parts.next().ok_or_else(|| DateTimeParseError {
+            component: Component::Time,
+            found: "".to_string(),
+            kind: DateTimeParseErrorKind::ValueMissing,
+        })?)?;
 
         Ok(Datetime { date, time })
     }
 }
 
 #[derive(Debug, Error)]
-enum DateTimeParseError {
-    #[error("Failed to parse date component: {source}")]
-    DateComponentError {
-        #[source]
-        source: Error,
-        part: String,
-    },
-    #[error("Failed to parse time component: {source}")]
-    TimeComponentError {
-        #[source]
-        source: Error,
-        part: String,
-    },
-    #[error("Unexpected characters beyond the end of input.")]
-    UnexpectedCharacters,
-    #[error("Failed to parse year and month: {source}")]
-    YearMonthError {
-        #[source]
-        source: Error,
-        part: String,
-    },
-    #[error("Invalid day in the month. Found: {found}")]
-    InvalidDay {
-        found: String,
-        #[source]
-        source: Option<Error>,
-    },
-    #[error("Invalid hour in the time. Found: {found}")]
-    InvalidHour {
-        found: String,
-        #[source]
-        source: Option<Error>,
-    },
-    #[error("Invalid minute in the time. Found: {found}")]
-    InvalidMinute {
-        found: String,
-        #[source]
-        source: Option<Error>,
-    },
-    #[error("Invalid second in the time. Found: {found}")]
-    InvalidSecond {
-        found: String,
-        #[source]
-        source: Option<Error>,
-    },
-    #[error("Invalid month. Found: {found}")]
-    InvalidMonth {
-        found: String,
-        #[source]
-        source: Option<Error>,
-    },
-    #[error("Invalid year. Found: {found}")]
-    InvalidYear {
-        found: String,
-        #[source]
-        source: Option<Error>,
-    },
+#[error("Failed to parse {component}'s value `{found}`: {kind}")]
+pub struct DateTimeParseError {
+    component: Component,
+    found: String,
+    kind: DateTimeParseErrorKind,
+}
+
+#[derive(Debug, Error)]
+pub enum DateTimeParseErrorKind {
+    #[error(transparent)]
+    InvalidNumber(Error),
+    #[error("The value is missing")]
+    ValueMissing,
+    #[error("The value must be at least {min} and at most {max}")]
+    OutOfRange { min: i32, max: i32 },
+}
+
+#[derive(Debug, PartialEq, Clone, strum::Display)]
+pub enum Component {
+    Year,
+    Month,
+    Day,
+    Hour,
+    Minute,
+    Second,
+
+    Date,
+    Time,
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
@@ -121,182 +91,56 @@ struct YearMonthDay {
 }
 
 #[derive(Debug, PartialEq, Clone)]
-struct HourMinuteSecond {
+pub struct HourMinuteSecond {
     hour: Hour,
     minute: Minute,
     second: Second,
 }
 
-impl TryFrom<i32> for Year {
-    type Error = DateTimeParseError;
+macro_rules! impl_parse_numeric {
+    ($component:tt, $inner:ty, $min:expr, $max:expr) => {
+        impl TryFrom<$inner> for $component {
+            type Error = DateTimeParseError;
 
-    fn try_from(value: i32) -> Result<Self, Self::Error> {
-        Ok(Year(value))
-    }
-}
+            fn try_from(value: $inner) -> Result<Self, Self::Error> {
+                if !(($min as $inner)..=($max as $inner)).contains(&value) {
+                    return Err(DateTimeParseError {
+                        component: Component::$component,
+                        found: value.to_string(),
+                        kind: DateTimeParseErrorKind::OutOfRange {
+                            min: $min,
+                            max: ($max - 1),
+                        },
+                    });
+                }
 
-impl TryFrom<u8> for Month {
-    type Error = DateTimeParseError;
-
-    fn try_from(value: u8) -> Result<Self, Self::Error> {
-        if (1..=12).contains(&value) {
-            Ok(Month(value))
-        } else {
-            Err(DateTimeParseError::InvalidMonth {
-                found: value.to_string(),
-                source: None,
-            })
+                Ok(Self(value))
+            }
         }
-    }
-}
 
-impl TryFrom<u8> for Day {
-    type Error = DateTimeParseError;
+        impl FromStr for $component {
+            type Err = DateTimeParseError;
 
-    fn try_from(value: u8) -> Result<Self, Self::Error> {
-        if (1..=31).contains(&value) {
-            Ok(Day(value))
-        } else {
-            Err(DateTimeParseError::InvalidDay {
-                found: value.to_string(),
-                source: None,
-            })
+            fn from_str(value: &str) -> Result<Self, Self::Err> {
+                let inner =
+                    <$inner as FromStr>::from_str(value).map_err(|source| DateTimeParseError {
+                        component: Component::$component,
+                        found: value.to_string(),
+                        kind: DateTimeParseErrorKind::InvalidNumber(source.into()),
+                    })?;
+
+                Self::try_from(inner)
+            }
         }
-    }
+    };
 }
 
-impl TryFrom<u8> for Hour {
-    type Error = DateTimeParseError;
-
-    fn try_from(value: u8) -> Result<Self, Self::Error> {
-        if (0..=23).contains(&value) {
-            Ok(Hour(value))
-        } else {
-            Err(DateTimeParseError::InvalidHour {
-                found: value.to_string(),
-                source: None,
-            })
-        }
-    }
-}
-
-impl TryFrom<u8> for Minute {
-    type Error = DateTimeParseError;
-
-    fn try_from(value: u8) -> Result<Self, Self::Error> {
-        if (0..=59).contains(&value) {
-            Ok(Minute(value))
-        } else {
-            Err(DateTimeParseError::InvalidMinute {
-                found: value.to_string(),
-                source: None,
-            })
-        }
-    }
-}
-
-impl TryFrom<f32> for Second {
-    type Error = DateTimeParseError;
-
-    fn try_from(value: f32) -> Result<Self, Self::Error> {
-        if (0.0..60.0).contains(&value) {
-            Ok(Second(value))
-        } else {
-            Err(DateTimeParseError::InvalidSecond {
-                found: value.to_string(),
-                source: None,
-            })
-        }
-    }
-}
-
-impl FromStr for Year {
-    type Err = DateTimeParseError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let value: i32 = s
-            .parse()
-            .map_err(|source| DateTimeParseError::InvalidYear {
-                found: String::from(s),
-                source: Some(Error::from(source)),
-            })?;
-
-        Year::try_from(value)
-    }
-}
-
-impl FromStr for Month {
-    type Err = DateTimeParseError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let value: u8 = s
-            .parse()
-            .map_err(|source| DateTimeParseError::InvalidMonth {
-                found: String::from(s),
-                source: Some(Error::from(source)),
-            })?;
-
-        Month::try_from(value)
-    }
-}
-
-impl FromStr for Day {
-    type Err = DateTimeParseError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let value: u8 = s.parse().map_err(|source| DateTimeParseError::InvalidDay {
-            found: String::from(s),
-            source: Some(Error::from(source)),
-        })?;
-
-        Day::try_from(value)
-    }
-}
-
-impl FromStr for Hour {
-    type Err = DateTimeParseError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let value: u8 = s
-            .parse()
-            .map_err(|source| DateTimeParseError::InvalidHour {
-                found: String::from(s),
-                source: Some(Error::from(source)),
-            })?;
-
-        Hour::try_from(value)
-    }
-}
-
-impl FromStr for Minute {
-    type Err = DateTimeParseError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let value: u8 = s
-            .parse()
-            .map_err(|source| DateTimeParseError::InvalidMinute {
-                found: String::from(s),
-                source: Some(Error::from(source)),
-            })?;
-
-        Minute::try_from(value)
-    }
-}
-
-impl FromStr for Second {
-    type Err = DateTimeParseError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let value: f32 = s
-            .parse()
-            .map_err(|source| DateTimeParseError::InvalidSecond {
-                found: String::from(s),
-                source: Some(Error::from(source)),
-            })?;
-
-        Second::try_from(value)
-    }
-}
+impl_parse_numeric!(Year, i32, i32::MIN, i32::MAX);
+impl_parse_numeric!(Month, u8, 1, 13);
+impl_parse_numeric!(Day, u8, 1, 32);
+impl_parse_numeric!(Hour, u8, 0, 24);
+impl_parse_numeric!(Minute, u8, 0, 60);
+impl_parse_numeric!(Second, f32, 0, 60);
 
 impl FromStr for YearMonthDay {
     type Err = DateTimeParseError;
@@ -304,31 +148,66 @@ impl FromStr for YearMonthDay {
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         let parts: Vec<&str> = value.split('-').collect();
 
-        let year = parts
-            .get(0)
-            .ok_or_else(|| DateTimeParseError::YearMonthError {
-                part: String::from(value),
-                source: Error::msg("Invalid year"),
-            })?;
-
-        let month = parts
-            .get(1)
-            .ok_or_else(|| DateTimeParseError::InvalidMonth {
-                found: String::from(value),
-                source: None,
-            })?;
-
-        let day = parts.get(2).ok_or_else(|| DateTimeParseError::InvalidDay {
-            found: String::from(value),
-            source: None,
+        let year = parts.first().ok_or_else(|| DateTimeParseError {
+            found: "".to_string(),
+            component: Component::Year,
+            kind: DateTimeParseErrorKind::ValueMissing,
+        })?;
+        let month = parts.get(1).ok_or_else(|| DateTimeParseError {
+            found: "".to_string(),
+            component: Component::Month,
+            kind: DateTimeParseErrorKind::ValueMissing,
+        })?;
+        let day = parts.get(2).ok_or_else(|| DateTimeParseError {
+            found: "".to_string(),
+            component: Component::Day,
+            kind: DateTimeParseErrorKind::ValueMissing,
         })?;
 
-        Ok(YearMonthDay {
-            year: Year::from_str(year)?,
-            month: Month::from_str(month)?,
-            day: Day::from_str(day)?,
-        })
+        let year = Year::from_str(year)?;
+        let month = Month::from_str(month)?;
+        let day = Day::from_str(day)?;
+
+        Self::from_components(year, month, day)
     }
+}
+
+impl YearMonthDay {
+    pub fn from_components(year: Year, month: Month, day: Day) -> Result<Self, DateTimeParseError> {
+        if !is_valid_day(year, month, day) {
+            return Err(DateTimeParseError {
+                kind: DateTimeParseErrorKind::OutOfRange {
+                    min: 1,
+                    max: day_in_month(year, month) as i32,
+                },
+                found: day.0.to_string(),
+                component: Component::Day,
+            });
+        }
+
+        Ok(YearMonthDay { year, month, day })
+    }
+}
+
+// Helper function to check if the given day is valid for the given year and month.
+fn is_valid_day(year: Year, month: Month, day: Day) -> bool {
+    day.0 <= day_in_month(year, month)
+}
+
+// Helper function to determine the number of days in a month.
+fn day_in_month(year: Year, month: Month) -> u8 {
+    match month.0 {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if is_leap_year(year.0) => 29,
+        2 => 28,
+        _ => unreachable!("The Month type guards against values that aren't in range (1..=12)"),
+    }
+}
+
+// Helper function to check if a year is a leap year.
+fn is_leap_year(year: i32) -> bool {
+    (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
 }
 
 impl FromStr for HourMinuteSecond {
@@ -337,26 +216,18 @@ impl FromStr for HourMinuteSecond {
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         let parts: Vec<&str> = value.split(':').collect();
 
-        let hour = parts
-            .get(0)
-            .ok_or_else(|| DateTimeParseError::InvalidHour {
-                found: String::from(value),
-                source: None,
-            })?;
+        let hour = parts.first().ok_or_else(|| DateTimeParseError {
+            component: Component::Hour,
+            found: value.to_string(),
+            kind: DateTimeParseErrorKind::ValueMissing,
+        })?;
+        let minute = parts.get(1).ok_or_else(|| DateTimeParseError {
+            component: Component::Minute,
+            found: value.to_string(),
+            kind: DateTimeParseErrorKind::ValueMissing,
+        })?;
 
-        let minute = parts
-            .get(1)
-            .ok_or_else(|| DateTimeParseError::InvalidMinute {
-                found: String::from(value),
-                source: None,
-            })?;
-
-        let second = parts
-            .get(2)
-            .ok_or_else(|| DateTimeParseError::InvalidSecond {
-                found: String::from(value),
-                source: None,
-            })?;
+        let second = parts.get(2).unwrap_or(&"0");
 
         Ok(HourMinuteSecond {
             hour: Hour::from_str(hour)?,

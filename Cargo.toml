@@ -8,4 +8,9 @@ license = "MIT"
 
 [dependencies]
 anyhow = "1.0.75"
+strum = { version = "0.25.0", features = ["derive"] }
+strum_macros = "0.25.3"
 thiserror = "1.0.51"
+
+[dev-dependencies]
+proptest = "1.0.0"
