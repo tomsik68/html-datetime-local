@@ -3,6 +3,13 @@ name = "html-datetime-local"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
+description = "A Rust library for parsing local date and time strings based on the WHATWG HTML Living Standard. This may be helpful for server-side code that deals with values from input type=datetime-local "
+repository = "https://github.com/tomsik68/html-datetime-local"
+homepage = "https://github.com/tomsik68/html-datetime-local"
+authors = ["Tomas Jasek <tomsik68@posteo.net>"]
+readme = "README.md"
+keywords = ["web", "parser", "date", "time"]
+categories = ["date-and-time", "parser-implementations"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
