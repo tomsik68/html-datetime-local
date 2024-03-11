@@ -15,7 +15,7 @@ categories = ["date-and-time", "parser-implementations"]
 
 [dependencies]
 anyhow = "1.0.75"
-strum = { version = "0.25.0", features = ["derive"] }
+strum = { version = "0.26.2", features = ["derive"] }
 strum_macros = "0.25.3"
 thiserror = "1.0.51"
 
